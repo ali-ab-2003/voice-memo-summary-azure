@@ -19,11 +19,14 @@
     },
     "android": {
       "package": "com.voicenote.ai",
-      "permissions": ["android.permission.RECORD_AUDIO"]
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
+      "expo-asset",
       [
-        "expo-av",
+        "expo-audio",
         {
           "microphonePermission": "VoiceNote AI needs access to your microphone to record voice memos."
         }

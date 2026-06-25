@@ -1,55 +1,58 @@
 /**
- * RecordScreen tests — expo-av is fully mocked, so no native modules,
+ * RecordScreen tests — expo-audio is fully mocked, so no native modules,
  * microphone, or audio files are touched. Verifies the record → stop → play
  * flow and the key error paths.
  */
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
 
 import RecordScreen from "../screens/RecordScreen";
-import { Audio } from "expo-av";
+import { AudioModule, createAudioPlayer, useAudioRecorder } from "expo-audio";
 
-// --- Mock expo-av ----------------------------------------------------------
-jest.mock("expo-av", () => {
-  const setOnPlaybackStatusUpdate = jest.fn();
-  const sound = {
-    setOnPlaybackStatusUpdate,
-    unloadAsync: jest.fn().mockResolvedValue(undefined),
+// --- Mock expo-audio -------------------------------------------------------
+jest.mock("expo-audio", () => {
+  const recorder = {
+    prepareToRecordAsync: jest.fn().mockResolvedValue(undefined),
+    record: jest.fn(),
+    stop: jest.fn().mockResolvedValue(undefined),
+    uri: "file:///tmp/recording.m4a",
   };
-  const recordingInstance = {
-    stopAndUnloadAsync: jest.fn().mockResolvedValue(undefined),
-    getURI: jest.fn().mockReturnValue("file:///tmp/recording.m4a"),
+  const player = {
+    play: jest.fn(),
+    remove: jest.fn(),
+    addListener: jest.fn(() => ({ remove: jest.fn() })),
   };
   return {
-    Audio: {
-      requestPermissionsAsync: jest.fn().mockResolvedValue({ granted: true }),
-      setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
-      RecordingOptionsPresets: { HIGH_QUALITY: {} },
-      Recording: {
-        createAsync: jest
-          .fn()
-          .mockResolvedValue({ recording: recordingInstance }),
-      },
-      Sound: {
-        createAsync: jest.fn().mockResolvedValue({ sound }),
-      },
+    useAudioRecorder: jest.fn(() => recorder),
+    AudioModule: {
+      requestRecordingPermissionsAsync: jest
+        .fn()
+        .mockResolvedValue({ granted: true }),
     },
-    InterruptionModeIOS: { DoNotMix: 1 },
-    InterruptionModeAndroid: { DoNotMix: 1 },
+    RecordingPresets: { HIGH_QUALITY: {} },
+    setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
+    createAudioPlayer: jest.fn(() => player),
   };
 });
+
+// Safe area context ships a jest mock that renders children without insets.
+jest.mock("react-native-safe-area-context", () =>
+  require("react-native-safe-area-context/jest/mock").default
+);
 
 // expo-status-bar renders nothing meaningful in tests.
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 
-const mockedAudio = Audio as unknown as {
-  requestPermissionsAsync: jest.Mock;
-  Recording: { createAsync: jest.Mock };
-  Sound: { createAsync: jest.Mock };
+const mockedAudioModule = AudioModule as unknown as {
+  requestRecordingPermissionsAsync: jest.Mock;
 };
+const mockedUseAudioRecorder = useAudioRecorder as unknown as jest.Mock;
+const mockedCreateAudioPlayer = createAudioPlayer as unknown as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockedAudio.requestPermissionsAsync.mockResolvedValue({ granted: true });
+  mockedAudioModule.requestRecordingPermissionsAsync.mockResolvedValue({
+    granted: true,
+  });
 });
 
 describe("RecordScreen", () => {
@@ -75,17 +78,16 @@ describe("RecordScreen", () => {
     // Play recording loads the saved URI.
     fireEvent.press(getByText("Play Recording"));
     await waitFor(() =>
-      expect(mockedAudio.Sound.createAsync).toHaveBeenCalledWith(
-        { uri: "file:///tmp/recording.m4a" },
-        { shouldPlay: true }
-      )
+      expect(mockedCreateAudioPlayer).toHaveBeenCalledWith({
+        uri: "file:///tmp/recording.m4a",
+      })
     );
 
     expect(queryByText(/required|Unable|No recording/)).toBeNull();
   });
 
   it("shows an error when microphone permission is denied", async () => {
-    mockedAudio.requestPermissionsAsync.mockResolvedValueOnce({
+    mockedAudioModule.requestRecordingPermissionsAsync.mockResolvedValueOnce({
       granted: false,
     });
     const { getByText } = render(<RecordScreen />);
@@ -102,7 +104,8 @@ describe("RecordScreen", () => {
   });
 
   it("surfaces a friendly error when recording fails to start", async () => {
-    mockedAudio.Recording.createAsync.mockRejectedValueOnce(
+    const recorder = mockedUseAudioRecorder();
+    recorder.prepareToRecordAsync.mockRejectedValueOnce(
       new Error("native failure")
     );
     const { getByText } = render(<RecordScreen />);

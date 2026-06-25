@@ -2,21 +2,21 @@
  * RecordScreen — Phase 2 (Record + Playback only).
  *
  * Lets the user request mic permission, record a voice memo, stop, and play it
- * back locally. No backend, no navigation, no upload. expo-av only.
+ * back locally. No backend, no navigation, no upload. expo-audio only.
  */
 import { useEffect, useRef, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { Audio } from "expo-av";
+  AudioModule,
+  createAudioPlayer,
+  useAudioRecorder,
+  type AudioPlayer,
+} from "expo-audio";
 import { StatusBar } from "expo-status-bar";
 
 import {
-  RECORDING_OPTIONS,
+  RECORDING_PRESET,
   configureAudioModeForPlayback,
   configureAudioModeForRecording,
 } from "../lib/audio";
@@ -38,27 +38,24 @@ const STATUS_COLOR: Record<Status, string> = {
 };
 
 export default function RecordScreen() {
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const audioRecorder = useAudioRecorder(RECORDING_PRESET);
+
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Keep a handle to the active playback sound so we can always unload it.
-  const soundRef = useRef<Audio.Sound | null>(null);
+  // Keep a handle to the active playback player so we can always release it.
+  const playerRef = useRef<AudioPlayer | null>(null);
 
-  // Clean up any in-flight recording / sound when the screen unmounts.
+  // Release any active playback player when the screen unmounts.
   useEffect(() => {
     return () => {
-      if (soundRef.current) {
-        soundRef.current.unloadAsync().catch(() => undefined);
-      }
-      if (recording) {
-        recording.stopAndUnloadAsync().catch(() => undefined);
+      if (playerRef.current) {
+        playerRef.current.remove();
+        playerRef.current = null;
       }
     };
-    // We intentionally capture the current `recording` on unmount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const status: Status = isRecording
@@ -72,43 +69,33 @@ export default function RecordScreen() {
   async function startRecording(): Promise<void> {
     setError(null);
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!permission.granted) {
         setError("Microphone permission is required to record audio.");
         return;
       }
 
       await configureAudioModeForRecording();
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
 
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        RECORDING_OPTIONS
-      );
-
-      setRecording(newRecording);
       setRecordedUri(null);
       setIsRecording(true);
     } catch (err) {
       console.warn("startRecording failed", err);
       setError("Unable to start recording.");
       setIsRecording(false);
-      setRecording(null);
     }
   }
 
   async function stopRecording(): Promise<void> {
-    if (!recording) {
-      setError("No recording in progress.");
-      return;
-    }
     try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
+      await audioRecorder.stop();
       await configureAudioModeForPlayback();
 
+      const uri = audioRecorder.uri;
       if (!uri) {
         setError("Recording failed: no audio file was created.");
-        setIsRecording(false);
-        setRecording(null);
         return;
       }
 
@@ -118,7 +105,6 @@ export default function RecordScreen() {
       setError("Unable to stop recording.");
     } finally {
       setIsRecording(false);
-      setRecording(null);
     }
   }
 
@@ -129,33 +115,27 @@ export default function RecordScreen() {
       return;
     }
     try {
-      // Unload any previously loaded sound before starting a new playback.
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
+      // Release any previously created player before starting a new playback.
+      if (playerRef.current) {
+        playerRef.current.remove();
+        playerRef.current = null;
       }
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: recordedUri },
-        { shouldPlay: true }
-      );
-      soundRef.current = sound;
-      setIsPlaying(true);
+      const player = createAudioPlayer({ uri: recordedUri });
+      playerRef.current = player;
 
-      sound.setOnPlaybackStatusUpdate((playbackStatus) => {
-        if (!playbackStatus.isLoaded) {
-          if (playbackStatus.error) {
-            setError("Playback failed.");
-            setIsPlaying(false);
-          }
-          return;
-        }
+      player.addListener("playbackStatusUpdate", (playbackStatus) => {
         if (playbackStatus.didJustFinish) {
           setIsPlaying(false);
-          sound.unloadAsync().catch(() => undefined);
-          soundRef.current = null;
+          player.remove();
+          if (playerRef.current === player) {
+            playerRef.current = null;
+          }
         }
       });
+
+      player.play();
+      setIsPlaying(true);
     } catch (err) {
       console.warn("playRecording failed", err);
       setError("Unable to play recording.");
