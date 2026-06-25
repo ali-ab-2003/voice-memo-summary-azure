@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "VoiceNote AI",
+    "slug": "voicenote-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.voicenote.ai",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "VoiceNote AI needs access to your microphone to record voice memos."
+      }
+    },
+    "android": {
+      "package": "com.voicenote.ai",
+      "permissions": ["android.permission.RECORD_AUDIO"]
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "VoiceNote AI needs access to your microphone to record voice memos."
+        }
+      ]
+    ]
+  }
+}

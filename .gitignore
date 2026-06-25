@@ -1,0 +1,30 @@
+# Added by code-review-graph
+.code-review-graph/
+
+# Secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+
+# Expo / React Native (app/ has its own .gitignore too)
+.expo/
+dist/
+web-build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
