@@ -1,8 +1,8 @@
 /**
- * RecordScreen — Phase 2 (Record + Playback only).
+ * RecordScreen — record / stop / playback plus "Generate Summary".
  *
- * Lets the user request mic permission, record a voice memo, stop, and play it
- * back locally. No backend, no navigation, no upload. expo-audio only.
+ * Generate Summary uploads the local recording to the backend and, on success,
+ * navigates to the Result screen. Audio handled by expo-audio; no persistence.
  */
 import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
@@ -15,6 +15,10 @@ import {
 } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
 
+import ProcessingOverlay from "../components/ProcessingOverlay";
+import { ApiError, uploadRecording } from "../lib/api";
+import type { RecordScreenProps } from "../lib/navigation";
+import { colors, radius, spacing } from "../lib/theme";
 import {
   RECORDING_PRESET,
   configureAudioModeForPlayback,
@@ -31,18 +35,19 @@ const STATUS_LABEL: Record<Status, string> = {
 };
 
 const STATUS_COLOR: Record<Status, string> = {
-  ready: "#64748B",
-  recording: "#DC2626",
-  saved: "#16A34A",
-  playing: "#2563EB",
+  ready: colors.textMuted,
+  recording: colors.record,
+  saved: colors.success,
+  playing: colors.play,
 };
 
-export default function RecordScreen() {
+export default function RecordScreen({ navigation }: RecordScreenProps) {
   const audioRecorder = useAudioRecorder(RECORDING_PRESET);
 
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   // Keep a handle to the active playback player so we can always release it.
@@ -143,12 +148,35 @@ export default function RecordScreen() {
     }
   }
 
-  const recordDisabled = isPlaying;
-  const playDisabled = !recordedUri || isRecording || isPlaying;
+  async function generateSummary(): Promise<void> {
+    setError(null);
+    if (!recordedUri) {
+      setError("Please record audio before continuing.");
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const result = await uploadRecording(recordedUri);
+      navigation.navigate("Result", { result });
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.message : "Voice processing failed.";
+      setError(message);
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  const busy = isUploading;
+  const recordDisabled = isPlaying || busy;
+  const playDisabled = !recordedUri || isRecording || isPlaying || busy;
+  const generateDisabled = !recordedUri || isRecording || isPlaying || busy;
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="dark" />
+      <ProcessingOverlay visible={isUploading} />
+
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>VoiceNote AI</Text>
@@ -201,6 +229,23 @@ export default function RecordScreen() {
 
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="Generate summary"
+            accessibilityState={{ disabled: generateDisabled }}
+            hitSlop={8}
+            disabled={generateDisabled}
+            onPress={generateSummary}
+            style={({ pressed }) => [
+              styles.button,
+              styles.generateButton,
+              pressed && styles.buttonPressed,
+              generateDisabled && styles.buttonDisabled,
+            ]}
+          >
+            <Text style={styles.buttonText}>Generate Summary</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Play recording"
             accessibilityState={{ disabled: playDisabled }}
             hitSlop={8}
@@ -232,28 +277,28 @@ export default function RecordScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: "#FAFAFA",
+    backgroundColor: colors.background,
   },
   container: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 48,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xxl,
     alignItems: "stretch",
   },
   header: {
     alignItems: "center",
-    marginBottom: 48,
+    marginBottom: spacing.xxl,
   },
   title: {
     fontSize: 32,
     fontWeight: "700",
-    color: "#0F172A",
+    color: colors.textPrimary,
     letterSpacing: -0.5,
   },
   subtitle: {
-    marginTop: 6,
+    marginTop: spacing.xs,
     fontSize: 15,
-    color: "#64748B",
+    color: colors.textMuted,
   },
   statusRow: {
     flexDirection: "row",
@@ -270,49 +315,52 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 16,
     fontWeight: "500",
-    color: "#334155",
+    color: colors.textSecondary,
   },
   actions: {
-    gap: 16,
+    gap: spacing.md,
   },
   button: {
     minHeight: 56,
-    borderRadius: 14,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.lg,
   },
   recordButton: {
-    backgroundColor: "#DC2626",
+    backgroundColor: colors.record,
   },
   stopButton: {
-    backgroundColor: "#0F172A",
+    backgroundColor: colors.stop,
+  },
+  generateButton: {
+    backgroundColor: colors.primary,
   },
   playButton: {
-    backgroundColor: "#2563EB",
+    backgroundColor: colors.play,
   },
   buttonPressed: {
     opacity: 0.85,
   },
   buttonDisabled: {
-    backgroundColor: "#CBD5E1",
+    backgroundColor: colors.disabled,
   },
   buttonText: {
-    color: "#FFFFFF",
+    color: colors.white,
     fontSize: 17,
     fontWeight: "600",
   },
   errorBox: {
-    marginTop: 28,
-    backgroundColor: "#FEF2F2",
-    borderColor: "#FECACA",
+    marginTop: spacing.xl,
+    backgroundColor: colors.errorBg,
+    borderColor: colors.errorBorder,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: radius.md,
     paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.md,
   },
   errorText: {
-    color: "#B91C1C",
+    color: colors.errorText,
     fontSize: 15,
     fontWeight: "500",
     textAlign: "center",

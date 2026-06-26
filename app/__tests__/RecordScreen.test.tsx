@@ -55,16 +55,25 @@ beforeEach(() => {
   });
 });
 
+// Minimal navigation/route stub so RecordScreen can render in isolation.
+// (Full navigation behaviour is covered in Phase 4.)
+import type { RecordScreenProps } from "../lib/navigation";
+
+const navProps = {
+  navigation: { navigate: jest.fn() },
+  route: { key: "Record", name: "Record", params: undefined },
+} as unknown as RecordScreenProps;
+
 describe("RecordScreen", () => {
   it("renders the title and an initial ready state", () => {
-    const { getByText } = render(<RecordScreen />);
+    const { getByText } = render(<RecordScreen {...navProps} />);
     expect(getByText("VoiceNote AI")).toBeTruthy();
     expect(getByText("Ready to record")).toBeTruthy();
     expect(getByText("Start Recording")).toBeTruthy();
   });
 
   it("supports the record → stop → play flow", async () => {
-    const { getByText, queryByText } = render(<RecordScreen />);
+    const { getByText, queryByText } = render(<RecordScreen {...navProps} />);
 
     // Start recording.
     fireEvent.press(getByText("Start Recording"));
@@ -90,7 +99,7 @@ describe("RecordScreen", () => {
     mockedAudioModule.requestRecordingPermissionsAsync.mockResolvedValueOnce({
       granted: false,
     });
-    const { getByText } = render(<RecordScreen />);
+    const { getByText } = render(<RecordScreen {...navProps} />);
 
     fireEvent.press(getByText("Start Recording"));
 
@@ -108,7 +117,7 @@ describe("RecordScreen", () => {
     recorder.prepareToRecordAsync.mockRejectedValueOnce(
       new Error("native failure")
     );
-    const { getByText } = render(<RecordScreen />);
+    const { getByText } = render(<RecordScreen {...navProps} />);
 
     fireEvent.press(getByText("Start Recording"));
 
