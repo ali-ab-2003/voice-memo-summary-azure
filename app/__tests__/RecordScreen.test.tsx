@@ -29,6 +29,8 @@ jest.mock("expo-audio", () => {
         .mockResolvedValue({ granted: true }),
     },
     RecordingPresets: { HIGH_QUALITY: {} },
+    IOSOutputFormat: { LINEARPCM: "lpcm" },
+    AudioQuality: { HIGH: 96 },
     setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
     createAudioPlayer: jest.fn(() => player),
   };
