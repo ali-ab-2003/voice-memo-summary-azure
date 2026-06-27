@@ -22,7 +22,7 @@ export const API_BASE_URL: string =
 export interface ProcessResult {
   transcript: string;
   summary: string;
-  keyPoints: string[];
+  keyPhrases: string[];
 }
 
 /** Request timeout in milliseconds — Azure processing can take a while. */
@@ -44,26 +44,34 @@ function parseProcessResult(data: unknown): ProcessResult {
     throw new ApiError("Voice processing failed: invalid server response.");
   }
   const record = data as Record<string, unknown>;
-  const { transcript, summary, keyPoints } = record;
+  // Backend (FastAPI) returns snake_case `key_phrases`; map it to the app's
+  // camelCase `keyPhrases` at this boundary.
+  const { transcript, summary, key_phrases: keyPhrases } = record;
 
   if (
     typeof transcript !== "string" ||
     typeof summary !== "string" ||
-    !Array.isArray(keyPoints) ||
-    !keyPoints.every((point) => typeof point === "string")
+    !Array.isArray(keyPhrases) ||
+    !keyPhrases.every((phrase) => typeof phrase === "string")
   ) {
     throw new ApiError("Voice processing failed: invalid server response.");
   }
 
-  return { transcript, summary, keyPoints: keyPoints as string[] };
+  return { transcript, summary, keyPhrases: keyPhrases as string[] };
 }
 
-/** Best-effort extraction of the backend's { error } message. */
+/** Best-effort extraction of the backend's error message. */
 async function readErrorMessage(response: Response): Promise<string> {
   try {
-    const body = (await response.json()) as { error?: unknown };
-    if (body && typeof body.error === "string" && body.error.trim()) {
-      return body.error;
+    // FastAPI returns errors as { detail: "..." }. Fall back to { error: "..." }
+    // for resilience against older/alternate responses.
+    const body = (await response.json()) as {
+      detail?: unknown;
+      error?: unknown;
+    };
+    const message = body?.detail ?? body?.error;
+    if (typeof message === "string" && message.trim()) {
+      return message;
     }
   } catch {
     // fall through to a generic message

@@ -36,14 +36,15 @@ export default function ResultScreen({ navigation, route }: ResultScreenProps) {
         </ResultSection>
 
         <ResultSection title="Key Points">
-          {result.keyPoints.length > 0 ? (
+          {result.keyPhrases.length > 0 ? (
             <View>
-              {result.keyPoints.map((point, index) => (
+              {result.keyPhrases.map((point, index) => (
                 <View
                   key={`${index}-${point}`}
                   style={[
                     styles.bulletRow,
-                    index === result.keyPoints.length - 1 && styles.bulletRowLast,
+                    index === result.keyPhrases.length - 1 &&
+                      styles.bulletRowLast,
                   ]}
                 >
                   <View style={styles.bulletDot} />

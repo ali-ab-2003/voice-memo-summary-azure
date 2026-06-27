@@ -1,8 +1,13 @@
-"""FastAPI application for VoiceNote AI (Phase 1 — Backend + Azure).
+"""VoiceNote AI — FastAPI application entrypoint.
 
-Endpoints:
-  GET  /health   -> {"status": "ok"}
-  POST /process  -> transcribe + summarize + key points
+WHY AZURE COMMUNICATION HAPPENS ONLY HERE (in the backend):
+    Azure keys must never ship inside the mobile app — anyone could extract
+    them from the bundle and run up the bill. The phone only ever talks to this
+    backend; the backend is the single, trusted place that holds the Azure
+    credentials and calls Azure on the user's behalf.
+
+Run locally:
+    uvicorn main:app --reload --host 0.0.0.0 --port 8000
 """
 
 from __future__ import annotations
@@ -10,64 +15,32 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 
-from azure_language import LanguageError, key_points, summarize
-from azure_speech import TranscriptionError, transcribe
-from config import validate_config
-from models import ErrorResponse, ProcessResponse
+from app.config import validate_config
+from app.routers import process
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 logger = logging.getLogger("voicenote")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Fail fast at startup if required Azure credentials are missing."""
+    """Fail fast at startup if any required Azure credential is missing."""
     validate_config()
+    logger.info("Configuration validated; VoiceNote AI is ready.")
     yield
 
 
-app = FastAPI(title="VoiceNote AI", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="VoiceNote AI", version="2.0.0", lifespan=lifespan)
+
+app.include_router(process.router)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+async def health() -> dict[str, str]:
+    """Liveness probe."""
     return {"status": "ok"}
-
-
-def _error(status_code: int, message: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code, content=ErrorResponse(error=message).model_dump()
-    )
-
-
-@app.post(
-    "/process",
-    response_model=ProcessResponse,
-    responses={400: {"model": ErrorResponse}, 502: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
-)
-async def process(audio: UploadFile | None = File(default=None)) -> JSONResponse:
-    """Transcribe, summarize and extract key points from an uploaded audio file."""
-    if audio is None:
-        return _error(400, "No audio file provided")
-
-    audio_bytes = await audio.read()
-    if not audio_bytes:
-        return _error(400, "No audio file provided")
-
-    try:
-        transcript = transcribe(audio_bytes)
-        summary = summarize(transcript)
-        points = key_points(transcript)
-    except (TranscriptionError, LanguageError):
-        logger.exception("Azure service failed")
-        return _error(502, "Azure service failed")
-    except Exception:  # noqa: BLE001 - last-resort guard
-        logger.exception("Unexpected error during processing")
-        return _error(500, "Unexpected error")
-
-    response = ProcessResponse(
-        transcript=transcript, summary=summary, keyPoints=points
-    )
-    return JSONResponse(status_code=200, content=response.model_dump())

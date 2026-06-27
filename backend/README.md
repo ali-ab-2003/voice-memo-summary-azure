@@ -1,86 +1,109 @@
-# VoiceNote AI — Backend (Phase 1)
+# VoiceNote AI — Backend
 
 FastAPI backend that turns a voice memo into a transcript, an abstractive
-summary, and a list of key points using Azure AI services.
+summary, and key phrases using **official Azure SDKs**. The mobile app talks
+only to this backend; the backend is the single trusted place that holds the
+Azure credentials and calls Azure.
 
-- **Transcription:** Azure AI Speech (Fast Transcription API)
-- **Summarization:** Azure AI Language (abstractive summarization)
-- **Key points:** Azure AI Language (key-phrase extraction)
+- **Transcription:** Azure AI Speech via `azure-cognitiveservices-speech` (Speech SDK, continuous recognition)
+- **Summarization + key phrases:** Azure AI Language via `azure-ai-textanalytics`
 
-## Project structure
+## Architecture
 
 ```
 backend/
-├── main.py            # FastAPI app: GET /health, POST /process
-├── azure_speech.py    # transcribe(audio_bytes) -> str
-├── azure_language.py  # summarize(text) -> str, key_points(text) -> list[str]
-├── models.py          # ProcessResponse, ErrorResponse
-├── config.py          # environment variable loading + validation
-├── requirements.txt
+├── main.py                     # FastAPI app: GET /health, includes the process router
 ├── .env.example
-└── tests/             # pytest suite with all Azure calls mocked
+├── requirements.txt
+└── app/
+    ├── config.py               # env-var loading + validation (python-dotenv)
+    ├── services/
+    │   ├── azure_speech.py      # SpeechService.transcribe(audio_path)
+    │   └── azure_language.py    # LanguageService.summarize / extract_key_phrases
+    ├── routers/
+    │   └── process.py           # POST /process + dependency providers
+    ├── models/
+    │   └── response_models.py   # ProcessResponse, ErrorResponse
+    └── utils/
+        └── file_utils.py        # validation + temp-file save/cleanup
 ```
+
+**Separation of responsibilities:** Speech and Language are distinct Azure
+resources with different SDKs/keys, so they live in separate service classes.
+Routing, file handling, config and models are each isolated so a junior dev can
+change one without touching the others.
 
 ## Setup
 
-From the `backend/` directory:
-
 ```bash
+cd backend
 pip install -r requirements.txt
 cp .env.example .env   # then fill in your Azure credentials
-uvicorn main:app --reload
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Environment variables
 
 All secrets are read from environment variables (loaded from `.env` in
-development via `python-dotenv`). The app fails fast with a clear error if any
-are missing.
+development via `python-dotenv`). The app fails fast at startup if any are
+missing. **Never hardcode secrets.**
 
-| Variable                  | Description                                   |
-| ------------------------- | --------------------------------------------- |
-| `AZURE_SPEECH_KEY`        | Azure AI Speech resource key                  |
-| `AZURE_SPEECH_REGION`     | Azure Speech region, e.g. `eastus`            |
-| `AZURE_LANGUAGE_ENDPOINT` | Azure AI Language resource endpoint URL       |
-| `AZURE_LANGUAGE_KEY`      | Azure AI Language resource key                |
+| Variable                  | Description                              |
+| ------------------------- | ---------------------------------------- |
+| `AZURE_SPEECH_KEY`        | Azure AI Speech resource key             |
+| `AZURE_SPEECH_REGION`     | Azure Speech region, e.g. `eastus`       |
+| `AZURE_LANGUAGE_KEY`      | Azure AI Language resource key           |
+| `AZURE_LANGUAGE_ENDPOINT` | Azure AI Language resource endpoint URL  |
 
 ## API
 
 ### `GET /health`
-
 ```json
 { "status": "ok" }
 ```
 
 ### `POST /process`
-
-`multipart/form-data` with a single `audio` field.
+`multipart/form-data` with a single `audio` field. Accepts **`.wav`** and
+**`.m4a`** only.
 
 ```bash
-curl -F "audio=@sample.m4a" http://localhost:8000/process
+curl -F "audio=@sample.wav" http://localhost:8000/process
 ```
 
 Success (`200`):
-
 ```json
 {
   "transcript": "...",
   "summary": "...",
-  "keyPoints": ["...", "..."]
+  "key_phrases": ["...", "..."]
 }
 ```
 
-Errors:
+Errors use FastAPI's `{ "detail": "..." }` shape:
 
-| Status | Body                                   | When                                |
-| ------ | -------------------------------------- | ----------------------------------- |
-| `400`  | `{"error": "No audio file provided"}`  | Missing or empty `audio` field      |
-| `502`  | `{"error": "Azure service failed"}`    | An Azure service returned an error   |
-| `500`  | `{"error": "Unexpected error"}`        | Any other unexpected failure        |
+| Status | When                                          |
+| ------ | --------------------------------------------- |
+| `400`  | Missing audio, empty file, unsupported format |
+| `422`  | No speech could be recognized in the audio    |
+| `502`  | An Azure service failed (transcription/language) |
+| `500`  | Unexpected error                              |
+
+## ⚠️ `.m4a` requires GStreamer
+
+The Speech SDK decodes **`.wav`/PCM natively**, but **compressed `.m4a` input
+requires GStreamer** to be installed on the host. Without it, `.m4a` files will
+fail to transcribe.
+
+- **macOS:** `brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad`
+- **Ubuntu/Debian:** `sudo apt-get install libgstreamer1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly`
+- **Windows:** install GStreamer (runtime) from https://gstreamer.freedesktop.org and add its `bin` to `PATH`.
+
+If GStreamer is not available, have the mobile app record/send **`.wav`**.
 
 ## Tests
 
-All Azure calls are mocked — the suite never reaches Azure.
+All Azure access is replaced with fakes via FastAPI dependency overrides — the
+suite never reaches Azure and needs no credentials.
 
 ```bash
 pytest

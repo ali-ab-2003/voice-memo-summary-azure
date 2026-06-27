@@ -3,7 +3,9 @@ uvicorn==0.49.0
 python-multipart==0.0.32
 python-dotenv==1.2.2
 pydantic==2.13.4
-requests==2.34.2
+
+# Azure SDKs (official, first-party only)
+azure-cognitiveservices-speech==1.50.0
 azure-ai-textanalytics==5.4.0
 azure-core==1.41.0
 
